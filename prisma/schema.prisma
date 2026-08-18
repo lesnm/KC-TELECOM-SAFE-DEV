@@ -54,6 +54,18 @@ enum DataSubscriptionStatus {
   FAILED
 }
 
+enum ConversionType {
+  AIRTIME
+  DATA
+}
+
+enum ConversionStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  COMPLETED
+}
+
 model User {
   id            String    @id @default(uuid())
   email         String    @unique
@@ -69,6 +81,7 @@ model User {
   batchesCreated        PinBatch[]        @relation("CreatedBatches")
   airtimePurchases      AirtimePurchase[]
   dataSubscriptions     DataSubscription[]
+  conversionRequests    ConversionRequest[]
 
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
@@ -105,11 +118,54 @@ model WalletTransaction {
   providerResponse  Json?
   paidAt        DateTime?
   creditedAt    DateTime?
+  conversionRequest ConversionRequest?
 
   createdAt     DateTime       @default(now())
 
   @@index([provider, providerReference])
   @@map("wallet_transactions")
+}
+
+model ConversionConfig {
+  id             String         @id @default(uuid())
+  type           ConversionType @unique
+  rate           Decimal        @db.Decimal(5, 2)
+  minimumAmount  Decimal        @db.Decimal(14, 2)
+  maximumAmount  Decimal?       @db.Decimal(14, 2)
+  isActive       Boolean        @default(true)
+
+  requests       ConversionRequest[]
+
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  @@map("conversion_configs")
+}
+
+model ConversionRequest {
+  id                  String           @id @default(uuid())
+  userId              String
+  user                User             @relation(fields: [userId], references: [id])
+  configId            String
+  config              ConversionConfig @relation(fields: [configId], references: [id])
+  walletTransactionId String?          @unique
+  walletTransaction   WalletTransaction? @relation(fields: [walletTransactionId], references: [id])
+
+  type                ConversionType
+  amount              Decimal          @db.Decimal(14, 2)
+  rate               Decimal          @db.Decimal(5, 2)
+  convertedAmount     Decimal          @db.Decimal(14, 2)
+  reference           String           @unique
+  status              ConversionStatus @default(PENDING)
+  sourcePhone         String?
+  rejectionReason     String?
+  processedAt         DateTime?
+
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+
+  @@index([userId, status])
+  @@map("conversion_requests")
 }
 
 model PinBatch {
