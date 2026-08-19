@@ -190,4 +190,21 @@ export class DataService {
     }
     return subscription;
   }
+
+  async reconcileByProviderReference(providerReference: string, result: NormalizedProviderResult) {
+    const subscription = await this.prisma.dataSubscription.findFirst({
+      where: { provider: 'PAIRGATE', providerReference },
+    });
+    if (!subscription) return null;
+    const transaction = await this.prisma.walletTransaction.findUniqueOrThrow({
+      where: { reference: subscription.reference },
+    });
+    return this.reconcile(
+      subscription.id,
+      transaction.id,
+      transaction.walletId,
+      Number(subscription.amount),
+      result,
+    );
+  }
 }

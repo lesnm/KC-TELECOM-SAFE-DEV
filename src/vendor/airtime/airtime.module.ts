@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { AirtimeController } from './airtime.controller';
 import { AirtimeService } from './airtime.service';
 import { HttpVtuProvider } from './providers/http-vtu.provider';
+import { PairgateProvider } from './providers/pairgate.provider';
 
 @Module({
   controllers: [AirtimeController],
@@ -10,6 +11,14 @@ import { HttpVtuProvider } from './providers/http-vtu.provider';
     {
       provide: 'AIRTIME_PROVIDER',
       useFactory: () => {
+        if ((process.env.AIRTIME_DATA_PROVIDER ?? 'HTTP').toUpperCase() === 'PAIRGATE') {
+          return new PairgateProvider({
+            baseUrl: process.env.PAIRGATE_BASE_URL ?? '',
+            apiKey: process.env.PAIRGATE_API_KEY ?? '',
+            timeoutMs: Number(process.env.PAIRGATE_TIMEOUT_MS ?? 10000),
+            dataPlanMap: parsePairgatePlanMap(),
+          });
+        }
         const name = process.env.VTU_PROVIDER_NAME ?? 'HTTP';
         return new HttpVtuProvider({
           baseUrl: process.env.VTU_BASE_URL ?? '',
@@ -23,3 +32,14 @@ import { HttpVtuProvider } from './providers/http-vtu.provider';
   exports: [AirtimeService],
 })
 export class AirtimeModule {}
+
+function parsePairgatePlanMap(): Record<string, string> {
+  const raw = process.env.PAIRGATE_DATA_PLAN_MAP ?? '{}';
+  const parsed = JSON.parse(raw) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('PAIRGATE_DATA_PLAN_MAP must be a JSON object');
+  }
+  return Object.fromEntries(
+    Object.entries(parsed).filter((entry): entry is [string, string] => typeof entry[1] === 'string'),
+  );
+}

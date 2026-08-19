@@ -9,6 +9,7 @@ import { AirtimeModule } from './vendor/airtime/airtime.module';
 import { DataModule } from './vendor/data/data.module';
 import { ReportsModule } from './reports/reports.module';
 import { ConversionModule } from './conversion/conversion.module';
+import { PairgateModule } from './vendor/pairgate/pairgate.module';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { ConversionModule } from './conversion/conversion.module';
     DataModule,
     ReportsModule,
     ConversionModule,
+    PairgateModule,
   ],
 })
 export class AppModule {}

@@ -20,10 +20,23 @@ POSTGRES_USER=<prod_user>
 POSTGRES_PASSWORD=<prod_password>
 POSTGRES_DB=kc_telecom
 VITE_API_BASE_URL=https://api.yourdomain.com/api/v1
+
+# Optional Airtime/Data provider selection
+AIRTIME_DATA_PROVIDER=HTTP
+PAIRGATE_BASE_URL=
+PAIRGATE_API_KEY=
+PAIRGATE_TIMEOUT_MS=10000
+PAIRGATE_DATA_PLAN_MAP=
+PAIRGATE_WEBHOOK_SECRET=
 ```
 
 Note: `DATABASE_URL` must use host `postgres` (the compose service name), not
 `localhost` — the backend reaches the database over the compose network.
+
+Set `AIRTIME_DATA_PROVIDER=PAIRGATE` only after configuring the Pairgate API
+credentials, webhook secret, and an explicit JSON mapping from the existing
+frontend plan keys to Pairgate `plan_id` values obtained from Pairgate's
+`/data-plans` endpoint. Plan IDs are never guessed by the application.
 
 `docker-compose.yml` requires `POSTGRES_USER`, `POSTGRES_PASSWORD`, and
 `POSTGRES_DB` to be set — it will refuse to start otherwise (no insecure

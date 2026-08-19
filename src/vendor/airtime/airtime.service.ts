@@ -177,4 +177,15 @@ export class AirtimeService {
       orderBy: { createdAt: 'desc' },
     });
   }
+
+  async reconcileByProviderReference(providerReference: string, result: NormalizedProviderResult) {
+    const purchase = await this.prisma.airtimePurchase.findFirst({
+      where: { provider: 'PAIRGATE', providerReference },
+    });
+    if (!purchase) return null;
+    const transaction = await this.prisma.walletTransaction.findUniqueOrThrow({
+      where: { reference: purchase.reference },
+    });
+    return this.reconcile(purchase.id, transaction.id, transaction.walletId, Number(purchase.amount), result);
+  }
 }
