@@ -17,6 +17,7 @@ import { CreateConversionRequestDto } from './dto/create-conversion-request.dto'
 import { ListConversionRequestsDto } from './dto/list-conversion-requests.dto';
 import { RejectConversionRequestDto } from './dto/reject-conversion-request.dto';
 import { UpdateConversionConfigDto } from './dto/update-conversion-config.dto';
+import { VerifyConversionRequestDto } from './dto/verify-conversion-request.dto';
 
 const requestInclude = {
   config: true,
@@ -82,6 +83,9 @@ export class ConversionService {
   }
 
   async createRequest(userId: string, dto: CreateConversionRequestDto) {
+    const sourceReference = dto.sourceReference.trim();
+    if (!sourceReference) throw new BadRequestException('Source reference is required');
+
     const config = await this.prisma.conversionConfig.findUnique({
       where: { type: dto.type },
     });
@@ -108,6 +112,7 @@ export class ConversionService {
         rate: config.rate,
         convertedAmount: expectedCredit,
         reference: `CONVERSION-${randomUUID()}`,
+        sourceReference,
         sourcePhone: dto.sourcePhone?.trim() || null,
       },
       include: requestInclude,
@@ -157,6 +162,9 @@ export class ConversionService {
             }
             if (request.status === ConversionStatus.REJECTED) {
               throw new ConflictException('Rejected conversion requests cannot be approved');
+            }
+            if (request.status !== ConversionStatus.APPROVED) {
+              throw new ConflictException('Conversion request must be verified before approval');
             }
 
             const reference = `CONVERSION-CREDIT-${request.id}`;
@@ -238,6 +246,38 @@ export class ConversionService {
     throw new ConflictException('Conversion approval could not be completed safely; please retry');
   }
 
+  async verifyRequest(requestId: string, adminId: string, dto: VerifyConversionRequestDto) {
+    const verificationNote = dto.verificationNote.trim();
+    if (!verificationNote) throw new BadRequestException('Verification note is required');
+
+    const claimed = await this.prisma.conversionRequest.updateMany({
+      where: { id: requestId, status: ConversionStatus.PENDING },
+      data: {
+        status: ConversionStatus.APPROVED,
+        verificationNote,
+        verifiedById: adminId,
+        verifiedAt: new Date(),
+      },
+    });
+
+    if (claimed.count === 0) {
+      const request = await this.prisma.conversionRequest.findUnique({ where: { id: requestId } });
+      if (!request) throw new NotFoundException('Conversion request not found');
+      if (request.status === ConversionStatus.APPROVED) {
+        return this.prisma.conversionRequest.findUniqueOrThrow({
+          where: { id: requestId },
+          include: requestInclude,
+        });
+      }
+      throw new ConflictException(`Conversion request cannot be verified from ${request.status} status`);
+    }
+
+    return this.prisma.conversionRequest.findUniqueOrThrow({
+      where: { id: requestId },
+      include: requestInclude,
+    });
+  }
+
   async rejectRequest(requestId: string, dto: RejectConversionRequestDto) {
     const reason = dto.reason.trim();
     if (!reason) throw new BadRequestException('Rejection reason is required');
@@ -249,10 +289,21 @@ export class ConversionService {
     if (request.status === ConversionStatus.CREDITED) {
       throw new ConflictException('Credited conversion requests cannot be rejected');
     }
-    if (request.status === ConversionStatus.REJECTED) return request;
+    if (request.status === ConversionStatus.REJECTED) {
+      return this.prisma.conversionRequest.findUniqueOrThrow({
+        where: { id: requestId },
+        include: requestInclude,
+      });
+    }
+    if (![ConversionStatus.PENDING, ConversionStatus.APPROVED].includes(request.status)) {
+      throw new ConflictException(`Conversion requests in ${request.status} status cannot be rejected`);
+    }
 
     const claimed = await this.prisma.conversionRequest.updateMany({
-      where: { id: requestId, status: ConversionStatus.PENDING },
+      where: {
+        id: requestId,
+        status: { in: [ConversionStatus.PENDING, ConversionStatus.APPROVED] },
+      },
       data: {
         status: ConversionStatus.REJECTED,
         rejectionReason: reason,
@@ -261,7 +312,20 @@ export class ConversionService {
     });
 
     if (claimed.count === 0) {
-      return this.prisma.conversionRequest.findUniqueOrThrow({ where: { id: requestId } });
+      const latest = await this.prisma.conversionRequest.findUniqueOrThrow({ where: { id: requestId } });
+      if (latest.status === ConversionStatus.REJECTED) {
+        return this.prisma.conversionRequest.findUniqueOrThrow({
+          where: { id: requestId },
+          include: requestInclude,
+        });
+      }
+      if (latest.status === ConversionStatus.CREDITED) {
+        throw new ConflictException('Credited conversion requests cannot be rejected');
+      }
+      if (latest.status === ConversionStatus.PENDING || latest.status === ConversionStatus.APPROVED) {
+        throw new ConflictException('Conversion rejection conflicted with another update; please retry');
+      }
+      throw new ConflictException(`Conversion requests in ${latest.status} status cannot be rejected`);
     }
 
     return this.prisma.conversionRequest.findUniqueOrThrow({

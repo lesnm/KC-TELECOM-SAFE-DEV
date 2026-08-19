@@ -4,7 +4,7 @@
 export type Role = 'ADMIN' | 'VENDOR';
 export type UserStatus = 'ACTIVE' | 'SUSPENDED';
 export type Network = 'MTN' | 'GLO' | 'AIRTEL' | 'NINE_MOBILE';
-export type WalletTxType = 'FUNDING' | 'DEBIT' | 'REFUND';
+export type WalletTxType = 'FUNDING' | 'DEBIT' | 'CREDIT' | 'REFUND';
 export type WalletTxStatus = 'PENDING' | 'SUCCESS' | 'FAILED';
 export type PinStatus = 'AVAILABLE' | 'SOLD';
 export type PurchaseStatus = 'PENDING' | 'COMPLETED' | 'FAILED';
@@ -42,6 +42,11 @@ export interface WalletTransaction {
   reference: string;
   status: WalletTxStatus;
   description: string | null;
+  provider: string | null;
+  providerReference: string | null;
+  providerResponse: unknown;
+  paidAt: string | null;
+  creditedAt: string | null;
   createdAt: string;
 }
 
@@ -153,7 +158,11 @@ export interface ConversionRequest {
   reference: string;
   status: ConversionStatus;
   sourcePhone: string | null;
+  sourceReference: string | null;
   rejectionReason: string | null;
+  verificationNote: string | null;
+  verifiedAt: string | null;
+  verifiedById: string | null;
   processedAt: string | null;
   createdAt: string;
   updatedAt: string;

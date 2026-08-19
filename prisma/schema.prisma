@@ -82,7 +82,8 @@ model User {
   batchesCreated        PinBatch[]        @relation("CreatedBatches")
   airtimePurchases      AirtimePurchase[]
   dataSubscriptions     DataSubscription[]
-  conversionRequests    ConversionRequest[]
+  conversionRequests          ConversionRequest[] @relation("ConversionRequestVendor")
+  verifiedConversionRequests  ConversionRequest[] @relation("ConversionRequestVerifier")
 
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
@@ -146,7 +147,9 @@ model ConversionConfig {
 model ConversionRequest {
   id                  String           @id @default(uuid())
   userId              String
-  user                User             @relation(fields: [userId], references: [id])
+  user                User             @relation("ConversionRequestVendor", fields: [userId], references: [id])
+  verifiedById         String?
+  verifiedBy           User?            @relation("ConversionRequestVerifier", fields: [verifiedById], references: [id])
   configId            String
   config              ConversionConfig @relation(fields: [configId], references: [id])
   walletTransactionId String?          @unique
@@ -159,7 +162,10 @@ model ConversionRequest {
   reference           String           @unique
   status              ConversionStatus @default(PENDING)
   sourcePhone         String?
+  sourceReference     String?
   rejectionReason     String?
+  verificationNote    String?
+  verifiedAt          DateTime?
   processedAt         DateTime?
 
   createdAt           DateTime         @default(now())

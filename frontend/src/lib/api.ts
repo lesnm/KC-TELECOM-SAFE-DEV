@@ -183,6 +183,7 @@ export const dataApi = {
 export interface CreateConversionRequestPayload {
   type: ConversionType;
   amount: number;
+  sourceReference: string;
   sourcePhone?: string;
 }
 
@@ -217,6 +218,11 @@ export const conversionApi = {
     const query = params.toString();
     return request<ConversionRequest[]>(`/admin/conversions/requests${query ? `?${query}` : ''}`);
   },
+  verify: (requestId: string, verificationNote: string) =>
+    request<ConversionRequest>(`/admin/conversions/requests/${encodeURIComponent(requestId)}/verify`, {
+      method: 'POST',
+      body: JSON.stringify({ verificationNote }),
+    }),
   approve: (requestId: string) =>
     request<{ request: ConversionRequest; transaction?: WalletTransaction; alreadyCredited: boolean }>(
       `/admin/conversions/requests/${encodeURIComponent(requestId)}/approve`,

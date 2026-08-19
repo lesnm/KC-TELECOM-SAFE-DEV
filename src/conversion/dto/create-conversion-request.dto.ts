@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { IsEnum, IsNumber, IsOptional, IsPositive, Matches, Max, Min } from 'class-validator';
+import { IsEnum, IsNumber, IsOptional, IsPositive, IsString, Matches, Max, Min, MinLength } from 'class-validator';
 import { ConversionType } from '@prisma/client';
 
 export class CreateConversionRequestDto {
@@ -12,6 +12,10 @@ export class CreateConversionRequestDto {
   @Min(0.01)
   @Max(1000000)
   amount: number;
+
+  @IsString()
+  @MinLength(1)
+  sourceReference: string;
 
   @IsOptional()
   @Matches(/^(0[7-9][0-1]\d{8}|[7-9][0-1]\d{8})$/, {

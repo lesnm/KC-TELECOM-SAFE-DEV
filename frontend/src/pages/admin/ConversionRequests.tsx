@@ -5,7 +5,7 @@ import { Badge, Banner, Button, Card, EmptyState, Select, Spinner } from '../../
 import type { ConversionRequest, ConversionStatus, ConversionType } from '../../types';
 
 function statusTone(status: ConversionStatus): 'slate' | 'green' | 'amber' | 'red' {
-  if (status === 'CREDITED' || status === 'COMPLETED') return 'green';
+  if (status === 'APPROVED' || status === 'CREDITED' || status === 'COMPLETED') return 'green';
   if (status === 'REJECTED') return 'red';
   if (status === 'PENDING') return 'amber';
   return 'slate';
@@ -16,6 +16,7 @@ export default function ConversionRequests() {
   const [status, setStatus] = useState<ConversionStatus | ''>('');
   const [type, setType] = useState<ConversionType | ''>('');
   const [reasons, setReasons] = useState<Record<string, string>>({});
+  const [verificationNotes, setVerificationNotes] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [workingId, setWorkingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -33,6 +34,24 @@ export default function ConversionRequests() {
     load();
   }, [status, type]);
 
+  const verify = async (requestId: string) => {
+    const verificationNote = verificationNotes[requestId]?.trim() ?? '';
+    if (!verificationNote) {
+      setError('Enter a verification note before verifying a request.');
+      return;
+    }
+    setError(null);
+    setWorkingId(requestId);
+    try {
+      await conversionApi.verify(requestId, verificationNote);
+      load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Unable to verify request');
+    } finally {
+      setWorkingId(null);
+    }
+  };
+
   const approve = async (requestId: string) => {
     setError(null);
     setWorkingId(requestId);
@@ -40,7 +59,7 @@ export default function ConversionRequests() {
       await conversionApi.approve(requestId);
       load();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Unable to approve request');
+      setError(err instanceof ApiError ? err.message : 'Unable to credit request');
     } finally {
       setWorkingId(null);
     }
@@ -75,6 +94,7 @@ export default function ConversionRequests() {
         <Select label="Status" value={status} onChange={(event) => setStatus(event.target.value as ConversionStatus | '')}>
           <option value="">All statuses</option>
           <option value="PENDING">Pending</option>
+          <option value="APPROVED">Verified</option>
           <option value="CREDITED">Credited</option>
           <option value="REJECTED">Rejected</option>
         </Select>
@@ -100,6 +120,7 @@ export default function ConversionRequests() {
                     <th className="py-2 pr-4">Type</th>
                     <th className="py-2 pr-4">Amount</th>
                     <th className="py-2 pr-4">Credit</th>
+                    <th className="py-2 pr-4">Source</th>
                     <th className="py-2 pr-4">Status</th>
                     <th className="py-2 pr-4">Action</th>
                   </tr>
@@ -115,13 +136,23 @@ export default function ConversionRequests() {
                       <td className="py-3 pr-4 font-medium">{request.type === 'AIRTIME' ? 'Airtime' : 'Data'}</td>
                       <td className="py-3 pr-4">{formatNaira(request.amount)}</td>
                       <td className="py-3 pr-4 font-medium text-green-700">{formatNaira(request.convertedAmount)}</td>
+                      <td className="py-3 pr-4 text-slate-600">{request.sourceReference || 'Not provided'}</td>
                       <td className="py-3 pr-4">
                         <Badge tone={statusTone(request.status)}>{request.status}</Badge>
+                        {request.verificationNote && <p className="mt-1 max-w-xs text-xs text-slate-600">{request.verificationNote}</p>}
                         {request.rejectionReason && <p className="mt-1 max-w-xs text-xs text-red-600">{request.rejectionReason}</p>}
                       </td>
                       <td className="py-3 pr-4">
-                        {request.status === 'PENDING' ? (
+                        {request.status === 'PENDING' || request.status === 'APPROVED' ? (
                           <div className="flex min-w-[220px] flex-col gap-2">
+                            {request.status === 'PENDING' && (
+                              <input
+                                className="rounded-lg border border-slate-300 px-3 py-2 text-xs"
+                                placeholder="Verification note"
+                                value={verificationNotes[request.id] ?? ''}
+                                onChange={(event) => setVerificationNotes((current) => ({ ...current, [request.id]: event.target.value }))}
+                              />
+                            )}
                             <input
                               className="rounded-lg border border-slate-300 px-3 py-2 text-xs"
                               placeholder="Reason if rejecting"
@@ -129,9 +160,15 @@ export default function ConversionRequests() {
                               onChange={(event) => setReasons((current) => ({ ...current, [request.id]: event.target.value }))}
                             />
                             <div className="flex gap-2">
-                              <Button type="button" className="px-3 py-1.5 text-xs" isLoading={workingId === request.id} onClick={() => approve(request.id)}>
-                                Approve
-                              </Button>
+                              {request.status === 'PENDING' ? (
+                                <Button type="button" className="px-3 py-1.5 text-xs" isLoading={workingId === request.id} onClick={() => verify(request.id)}>
+                                  Verify
+                                </Button>
+                              ) : (
+                                <Button type="button" className="px-3 py-1.5 text-xs" isLoading={workingId === request.id} onClick={() => approve(request.id)}>
+                                  Credit
+                                </Button>
+                              )}
                               <Button type="button" variant="danger" className="px-3 py-1.5 text-xs" isLoading={workingId === request.id} onClick={() => reject(request.id)}>
                                 Reject
                               </Button>

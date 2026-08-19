@@ -7,6 +7,7 @@ import type { ConversionConfig, ConversionRequest, ConversionType } from '../typ
 export function ConversionRequestForm({ type }: { type: ConversionType }) {
   const [config, setConfig] = useState<ConversionConfig | null>(null);
   const [amount, setAmount] = useState('');
+  const [sourceReference, setSourceReference] = useState('');
   const [sourcePhone, setSourcePhone] = useState('');
   const [result, setResult] = useState<ConversionRequest | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -53,10 +54,12 @@ export function ConversionRequestForm({ type }: { type: ConversionType }) {
       const created = await conversionApi.createRequest({
         type,
         amount: numericAmount,
+        sourceReference: sourceReference.trim(),
         sourcePhone: sourcePhone.trim() || undefined,
       });
       setResult(created);
       setAmount('');
+      setSourceReference('');
       setSourcePhone('');
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Unable to submit conversion request');
@@ -116,10 +119,19 @@ export function ConversionRequestForm({ type }: { type: ConversionType }) {
                 required
               />
               <Input
+                label="Source transaction reference"
+                value={sourceReference}
+                onChange={(event) => setSourceReference(event.target.value)}
+                placeholder="e.g. transfer reference or receipt number"
+                required
+              />
+              <Input
                 label="Source phone number (optional)"
                 value={sourcePhone}
                 onChange={(event) => setSourcePhone(event.target.value)}
                 placeholder="08012345678"
+                pattern="^(0[7-9][0-1]\d{8}|[7-9][0-1]\d{8})$"
+                title="Enter a valid Nigerian mobile number (e.g., 08012345678)"
               />
               {expectedCredit !== null && (
                 <p className="rounded-lg bg-brand-50 px-3 py-2 text-sm text-brand-700">
