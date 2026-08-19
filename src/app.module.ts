@@ -8,6 +8,7 @@ import { PinPurchaseModule } from './vendor/pin-purchase/pin-purchase.module';
 import { AirtimeModule } from './vendor/airtime/airtime.module';
 import { DataModule } from './vendor/data/data.module';
 import { ReportsModule } from './reports/reports.module';
+import { ConversionModule } from './conversion/conversion.module';
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { ReportsModule } from './reports/reports.module';
     AirtimeModule,
     DataModule,
     ReportsModule,
+    ConversionModule,
   ],
 })
 export class AppModule {}

@@ -13,6 +13,9 @@ import BuyAirtime from './pages/vendor/BuyAirtime';
 import MyPurchases from './pages/vendor/MyPurchases';
 import PurchasedPins from './pages/vendor/PurchasedPins';
 import Transactions from './pages/vendor/Transactions';
+import AirtimeToCash from './pages/vendor/AirtimeToCash';
+import DataToCash from './pages/vendor/DataToCash';
+import ConversionHistory from './pages/vendor/ConversionHistory';
 
 import AdminDashboard from './pages/admin/AdminDashboard';
 import CreateBatch from './pages/admin/CreateBatch';
@@ -21,6 +24,8 @@ import Inventory from './pages/admin/Inventory';
 import Vendors from './pages/admin/Vendors';
 import Sales from './pages/admin/Sales';
 import Reports from './pages/admin/Reports';
+import ConversionRequests from './pages/admin/ConversionRequests';
+import ConversionSettings from './pages/admin/ConversionSettings';
 
 function RootRedirect() {
   const { isAuthenticated, user, isLoading } = useAuth();
@@ -43,6 +48,9 @@ export default function App() {
             <Route path="/vendor/wallet" element={<Wallet />} />
             <Route path="/vendor/buy-pins" element={<BuyPins />} />
             <Route path="/vendor/buy-airtime" element={<BuyAirtime />} />
+            <Route path="/vendor/airtime-to-cash" element={<AirtimeToCash />} />
+            <Route path="/vendor/data-to-cash" element={<DataToCash />} />
+            <Route path="/vendor/conversions" element={<ConversionHistory />} />
             <Route path="/vendor/purchases" element={<MyPurchases />} />
             <Route path="/vendor/purchases/:purchaseId" element={<PurchasedPins />} />
             <Route path="/vendor/transactions" element={<Transactions />} />
@@ -58,6 +66,8 @@ export default function App() {
             <Route path="/admin/vendors" element={<Vendors />} />
             <Route path="/admin/sales" element={<Sales />} />
             <Route path="/admin/reports" element={<Reports />} />
+            <Route path="/admin/conversion-requests" element={<ConversionRequests />} />
+            <Route path="/admin/conversion-settings" element={<ConversionSettings />} />
           </Route>
         </Route>
 

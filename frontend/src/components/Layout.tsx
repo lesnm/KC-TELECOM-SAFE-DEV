@@ -6,6 +6,9 @@ const vendorNav = [
   { to: '/vendor/wallet', label: 'Wallet' },
   { to: '/vendor/buy-pins', label: 'Buy PIN Books' },
   { to: '/vendor/buy-airtime', label: 'Buy Airtime' },
+  { to: '/vendor/airtime-to-cash', label: 'Airtime to Cash' },
+  { to: '/vendor/data-to-cash', label: 'Data to Cash' },
+  { to: '/vendor/conversions', label: 'Conversion History' },
   { to: '/vendor/purchases', label: 'My Purchases' },
   { to: '/vendor/transactions', label: 'Transactions' },
 ];
@@ -18,6 +21,8 @@ const adminNav = [
   { to: '/admin/vendors', label: 'Vendors' },
   { to: '/admin/sales', label: 'Sales' },
   { to: '/admin/reports', label: 'Revenue & Profit' },
+  { to: '/admin/conversion-requests', label: 'Conversion Requests' },
+  { to: '/admin/conversion-settings', label: 'Conversion Settings' },
 ];
 
 export function Layout() {

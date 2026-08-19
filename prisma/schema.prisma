@@ -64,6 +64,7 @@ enum ConversionStatus {
   APPROVED
   REJECTED
   COMPLETED
+  CREDITED
 }
 
 model User {

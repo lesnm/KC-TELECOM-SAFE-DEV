@@ -8,6 +8,8 @@ export type WalletTxType = 'FUNDING' | 'DEBIT' | 'REFUND';
 export type WalletTxStatus = 'PENDING' | 'SUCCESS' | 'FAILED';
 export type PinStatus = 'AVAILABLE' | 'SOLD';
 export type PurchaseStatus = 'PENDING' | 'COMPLETED' | 'FAILED';
+export type ConversionType = 'AIRTIME' | 'DATA';
+export type ConversionStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'COMPLETED' | 'CREDITED';
 
 export interface AuthUser {
   id: string;
@@ -124,6 +126,46 @@ export interface VendorSummary {
   totalPinsBought: number;
   totalSpent: number;
   purchaseCount: number;
+}
+
+export interface ConversionConfig {
+  id: string;
+  type: ConversionType;
+  rate: string;
+  minimumAmount: string;
+  maximumAmount: string | null;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ConversionRequest {
+  id: string;
+  userId: string;
+  configId: string;
+  walletTransactionId: string | null;
+  type: ConversionType;
+  amount: string;
+  rate: string;
+  convertedAmount: string;
+  conversionRate?: string;
+  expectedCredit?: string;
+  reference: string;
+  status: ConversionStatus;
+  sourcePhone: string | null;
+  rejectionReason: string | null;
+  processedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  config?: ConversionConfig;
+  user?: {
+    id: string;
+    fullName: string;
+    businessName: string | null;
+    email: string;
+    phone: string;
+  };
+  walletTransaction?: WalletTransaction | null;
 }
 
 // Matches src/common/filters/all-exceptions.filter.ts exactly.

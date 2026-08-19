@@ -2,6 +2,10 @@ import type {
   AirtimePurchase,
   AuthResponse,
   DataSubscription,
+  ConversionConfig,
+  ConversionRequest,
+  ConversionStatus,
+  ConversionType,
   InventorySummary,
   PinBatch,
   PinPurchase,
@@ -172,6 +176,57 @@ export const dataApi = {
       body: JSON.stringify(payload),
     }),
   history: () => request<DataSubscription[]>('/vendor/data/history'),
+};
+
+// ---- conversions -------------------------------------------------------
+
+export interface CreateConversionRequestPayload {
+  type: ConversionType;
+  amount: number;
+  sourcePhone?: string;
+}
+
+export interface UpdateConversionConfigPayload {
+  rate: number;
+  minimumAmount: number;
+  maximumAmount?: number | null;
+  isActive?: boolean;
+}
+
+export const conversionApi = {
+  activeConfigs: () => request<ConversionConfig[]>('/vendor/conversions/config'),
+  createRequest: (payload: CreateConversionRequestPayload) =>
+    request<ConversionRequest>('/vendor/conversions/requests', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  myRequests: (status?: ConversionStatus) =>
+    request<ConversionRequest[]>(
+      `/vendor/conversions/requests${status ? `?status=${encodeURIComponent(status)}` : ''}`,
+    ),
+  adminConfigs: () => request<ConversionConfig[]>('/admin/conversions/config'),
+  updateConfig: (type: ConversionType, payload: UpdateConversionConfigPayload) =>
+    request<ConversionConfig>(`/admin/conversions/config/${type}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    }),
+  adminRequests: (filters: { status?: ConversionStatus; type?: ConversionType } = {}) => {
+    const params = new URLSearchParams();
+    if (filters.status) params.set('status', filters.status);
+    if (filters.type) params.set('type', filters.type);
+    const query = params.toString();
+    return request<ConversionRequest[]>(`/admin/conversions/requests${query ? `?${query}` : ''}`);
+  },
+  approve: (requestId: string) =>
+    request<{ request: ConversionRequest; transaction?: WalletTransaction; alreadyCredited: boolean }>(
+      `/admin/conversions/requests/${encodeURIComponent(requestId)}/approve`,
+      { method: 'POST' },
+    ),
+  reject: (requestId: string, reason: string) =>
+    request<ConversionRequest>(`/admin/conversions/requests/${encodeURIComponent(requestId)}/reject`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    }),
 };
 
 // ---- admin pin stock -------------------------------------------------
