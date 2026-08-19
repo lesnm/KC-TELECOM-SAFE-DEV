@@ -295,7 +295,7 @@ export class ConversionService {
         include: requestInclude,
       });
     }
-    if (![ConversionStatus.PENDING, ConversionStatus.APPROVED].includes(request.status)) {
+    if (request.status !== ConversionStatus.PENDING && request.status !== ConversionStatus.APPROVED) {
       throw new ConflictException(`Conversion requests in ${request.status} status cannot be rejected`);
     }
 
