@@ -1,4 +1,6 @@
-import { VtuPurchaseParams, VtuPurchaseResult, VtuProvider } from './vtu.provider';
+import { AirtimeProvider, AirtimePurchaseParams } from './airtime.provider';
+import { DataProvider, DataPurchaseParams } from '../../data/providers/data.provider';
+import { NormalizedProviderResult } from '../../providers/provider-result';
 import * as https from 'https';
 import { URL } from 'url';
 
@@ -9,7 +11,7 @@ export interface HttpVtuProviderOptions {
   name?: string;
 }
 
-export class HttpVtuProvider implements VtuProvider {
+export class HttpVtuProvider implements AirtimeProvider, DataProvider {
   name: string;
   private baseUrl: string;
   private apiKey: string;
@@ -28,7 +30,7 @@ export class HttpVtuProvider implements VtuProvider {
     return value.toLowerCase();
   }
 
-  async purchaseAirtime(params: VtuPurchaseParams): Promise<VtuPurchaseResult> {
+  async purchaseAirtime(params: AirtimePurchaseParams): Promise<NormalizedProviderResult> {
     return this._post('/airtime/purchase', {
       provider_id: this.providerSlug(params.network),
       amount: params.amount,
@@ -37,8 +39,7 @@ export class HttpVtuProvider implements VtuProvider {
     });
   }
 
-  async purchaseData(params: VtuPurchaseParams & { plan?: string }): Promise<VtuPurchaseResult> {
-    if (!params.plan) return { success: false, message: 'Data plan ID is required' };
+  async purchaseData(params: DataPurchaseParams): Promise<NormalizedProviderResult> {
     return this._post('/data/purchase', {
       provider_id: this.providerSlug(params.network),
       plan_id: params.plan,
@@ -47,9 +48,9 @@ export class HttpVtuProvider implements VtuProvider {
     });
   }
 
-  private async _post(path: string, params: any): Promise<VtuPurchaseResult> {
-    if (!this.baseUrl) return { success: false, message: 'VTU_BASE_URL not configured' };
-    if (!this.apiKey) return { success: false, message: 'VTU_API_KEY not configured' };
+  private async _post(path: string, params: Record<string, unknown>): Promise<NormalizedProviderResult> {
+    if (!this.baseUrl) return this.unknown('VTU_BASE_URL not configured');
+    if (!this.apiKey) return this.unknown('VTU_API_KEY not configured');
 
     try {
       const url = new URL(`${this.baseUrl}${path}`);
@@ -82,12 +83,62 @@ export class HttpVtuProvider implements VtuProvider {
       let parsed: any;
       try { parsed = JSON.parse(raw); } catch { parsed = { message: raw }; }
 
-      const success = statusCode >= 200 && statusCode < 300 && parsed?.status === 'success';
+      const providerStatus = typeof parsed?.status === 'string' ? parsed.status : undefined;
       const providerReference = parsed?.data?.reference_code ?? parsed?.reference_code ?? undefined;
       const message = parsed?.message ?? parsed?.data?.message;
-      return { success, providerReference, rawResponse: parsed, message };
+      if (!providerStatus) return this.unknown(message ?? 'Provider returned malformed response', parsed);
+
+      const normalizedStatus = providerStatus.toLowerCase();
+      if (normalizedStatus === 'success' && statusCode >= 200 && statusCode < 300) {
+        return {
+          outcome: 'SUCCESS',
+          providerName: this.name,
+          providerReference,
+          providerStatus,
+          retryability: 'NOT_RETRYABLE',
+          rawResponse: parsed,
+          message,
+        };
+      }
+
+      if (['pending', 'processing', 'queued'].includes(normalizedStatus)) {
+        return {
+          outcome: 'PENDING',
+          providerName: this.name,
+          providerReference,
+          providerStatus,
+          retryability: 'RETRYABLE',
+          rawResponse: parsed,
+          message,
+        };
+      }
+
+      if (['failed', 'rejected', 'declined', 'error'].includes(normalizedStatus)) {
+        return {
+          outcome: 'REJECTED',
+          providerName: this.name,
+          providerReference,
+          providerStatus,
+          retryability: 'NOT_RETRYABLE',
+          rawResponse: parsed,
+          message,
+        };
+      }
+
+      return this.unknown(message ?? `Provider returned status ${providerStatus}`, parsed, providerStatus);
     } catch (err) {
-      return { success: false, message: err instanceof Error ? err.message : String(err) };
+      return this.unknown(err instanceof Error ? err.message : String(err));
     }
+  }
+
+  private unknown(message: string, rawResponse?: unknown, providerStatus?: string): NormalizedProviderResult {
+    return {
+      outcome: 'UNKNOWN',
+      providerName: this.name,
+      providerStatus,
+      retryability: 'UNKNOWN',
+      rawResponse,
+      message,
+    };
   }
 }

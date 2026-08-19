@@ -1,27 +1,21 @@
-import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { BuyAirtimeDto } from './dto/buy-airtime.dto';
-import { VtuProvider } from './providers/vtu.provider';
+import { AirtimeProvider } from './providers/airtime.provider';
+import { NormalizedProviderResult } from '../providers/provider-result';
 
 @Injectable()
 export class AirtimeService {
-  constructor(private prisma: PrismaService, @Inject('VTU_PROVIDER') private vtu: VtuProvider) {}
+  constructor(
+    private prisma: PrismaService,
+    @Inject('AIRTIME_PROVIDER') private provider: AirtimeProvider,
+  ) {}
 
-  /**
-   * Purchases airtime for a phone number, debiting the vendor's wallet.
-   * Flow:
-   * 1. Create a PENDING AirtimePurchase, debit wallet and create a PENDING DEBIT ledger entry (single db tx).
-   * 2. Call external VTU provider.
-   * 3a. On success: mark purchase COMPLETED and ledger entry SUCCESS, attach provider info.
-   * 3b. On failure: mark purchase FAILED, mark initial ledger FAILED and create a SUCCESS CREDIT ledger to refund the vendor.
-   */
   async purchase(vendorId: string, dto: BuyAirtimeDto) {
-    // Step 0: basic checks and wallet lookup
     const wallet = await this.prisma.wallet.findUnique({ where: { userId: vendorId } });
     if (!wallet) throw new NotFoundException('Wallet not found');
-
     if (Number(wallet.balance) < dto.amount) {
       throw new BadRequestException(
         `Insufficient wallet balance. Available: ₦${Number(wallet.balance).toFixed(2)}`,
@@ -29,127 +23,154 @@ export class AirtimeService {
     }
 
     const reference = `AIR-${randomUUID()}`;
-    const balanceBefore = wallet.balance;
-    const newBalance = Number(wallet.balance) - dto.amount;
-
-    // Step 1: create purchase (PENDING), debit wallet and create a PENDING ledger entry
-    const txResult = await this.prisma.$transaction(
-      async (tx) => {
-        const airtimePurchase = await tx.airtimePurchase.create({
-          data: {
-            vendorId,
-            network: dto.network,
-            phone: dto.phone,
-            amount: dto.amount,
-            reference,
-            status: 'PENDING',
-          },
-        });
-
-        await tx.wallet.update({ where: { id: wallet.id }, data: { balance: newBalance } });
-
-        const txEntry = await tx.walletTransaction.create({
-          data: {
-            walletId: wallet.id,
-            type: 'DEBIT',
-            amount: dto.amount,
-            balanceBefore,
-            balanceAfter: newBalance,
-            reference,
-            status: 'PENDING',
-            description: `Airtime purchase — ${dto.network} ₦${dto.amount} → ${dto.phone}`,
-          },
-        });
-
-        return { airtimePurchase, txEntry };
-      },
-      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
-    );
-
-    // Step 2: call external provider
-    let providerResult: { success: boolean; providerReference?: string; rawResponse?: any; message?: string };
+    let txResult: { airtimePurchase: { id: string }; txEntry: { id: string } };
     try {
-      providerResult = await this.vtu.purchaseAirtime({
+      txResult = await this.prisma.$transaction(
+        async (tx) => {
+          const currentWallet = await tx.wallet.findUnique({ where: { id: wallet.id } });
+          if (!currentWallet) throw new NotFoundException('Wallet not found');
+          if (Number(currentWallet.balance) < dto.amount) {
+            throw new BadRequestException('Insufficient wallet balance');
+          }
+
+          const balanceBefore = currentWallet.balance;
+          const newBalance = Number(balanceBefore) - dto.amount;
+          const airtimePurchase = await tx.airtimePurchase.create({
+            data: {
+              vendorId,
+              network: dto.network,
+              phone: dto.phone,
+              amount: dto.amount,
+              reference,
+              status: 'PENDING',
+            },
+          });
+
+          await tx.wallet.update({
+            where: { id: wallet.id },
+            data: { balance: { decrement: dto.amount } },
+          });
+
+          const txEntry = await tx.walletTransaction.create({
+            data: {
+              walletId: wallet.id,
+              type: 'DEBIT',
+              amount: dto.amount,
+              balanceBefore,
+              balanceAfter: newBalance,
+              reference,
+              status: 'PENDING',
+              description: `Airtime purchase — ${dto.network} ₦${dto.amount} → ${dto.phone}`,
+            },
+          });
+
+          return { airtimePurchase, txEntry };
+        },
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+      );
+    } catch (error: any) {
+      if (error?.code === 'P2034') {
+        throw new ConflictException('Wallet is busy processing another purchase, please retry');
+      }
+      throw error;
+    }
+
+    let result: NormalizedProviderResult;
+    try {
+      result = await this.provider.purchaseAirtime({
         network: dto.network,
         phone: dto.phone,
         amount: dto.amount,
         reference,
       });
-    } catch (err) {
-      providerResult = { success: false, message: err instanceof Error ? err.message : String(err) };
+    } catch (error) {
+      result = {
+        outcome: 'UNKNOWN',
+        providerName: this.provider.name,
+        retryability: 'UNKNOWN',
+        message: error instanceof Error ? error.message : String(error),
+      };
     }
 
-    // Step 3: reconcile based on provider response
-    if (providerResult.success) {
-      // mark purchase COMPLETED and tx SUCCESS
-      const updated = await this.prisma.$transaction(async (tx) => {
-        const updatedPurchase = await tx.airtimePurchase.update({
-          where: { id: txResult.airtimePurchase.id },
-          data: { status: 'COMPLETED' },
-        });
-
-        await tx.walletTransaction.update({
-          where: { id: txResult.txEntry.id },
-          data: {
-            status: 'SUCCESS',
-            provider: this.vtu.name ?? null,
-            providerReference: providerResult.providerReference ?? null,
-            providerResponse: providerResult.rawResponse ?? null,
-            paidAt: new Date(),
-          },
-        });
-
-        return updatedPurchase;
-      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
-
-      return updated;
-    }
-
-    // Provider failed — refund the vendor
-    const refundResult = await this.prisma.$transaction(async (tx) => {
-      // mark purchase FAILED
-      const failedPurchase = await tx.airtimePurchase.update({
-        where: { id: txResult.airtimePurchase.id },
-        data: { status: 'FAILED' },
-      });
-
-      // mark initial tx FAILED
-      await tx.walletTransaction.update({
-        where: { id: txResult.txEntry.id },
-        data: {
-          status: 'FAILED',
-          provider: this.vtu.name ?? null,
-          providerResponse: providerResult.rawResponse ?? { message: providerResult.message ?? 'Provider error' },
-        },
-      });
-
-      // refund: credit wallet back
-      const currentWallet = await tx.wallet.findUnique({ where: { id: wallet.id } });
-      const before = currentWallet?.balance ?? 0;
-      const after = Number(before) + Number(dto.amount);
-
-      await tx.wallet.update({ where: { id: wallet.id }, data: { balance: after } });
-
-      const refundTx = await tx.walletTransaction.create({
-        data: {
-          walletId: wallet.id,
-          type: 'CREDIT',
-          amount: dto.amount,
-          balanceBefore: before,
-          balanceAfter: after,
-          reference: `${reference}-REFUND`,
-          status: 'SUCCESS',
-          description: `Refund for failed airtime purchase — ${dto.network} ₦${dto.amount} → ${dto.phone}`,
-        },
-      });
-
-      return failedPurchase;
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
-
-    return refundResult;
+    return this.reconcile(txResult.airtimePurchase.id, txResult.txEntry.id, wallet.id, dto.amount, result);
   }
 
-  /** Returns all airtime purchases for the requesting vendor, newest first. */
+  private async reconcile(
+    purchaseId: string,
+    transactionId: string,
+    walletId: string,
+    amount: number,
+    result: NormalizedProviderResult,
+  ) {
+    const providerData = {
+      provider: result.providerName,
+      providerReference: result.providerReference,
+      providerStatus: result.providerStatus,
+      providerOutcome: result.outcome,
+      providerRetryability: result.retryability,
+      providerResponse: result.rawResponse as Prisma.InputJsonValue,
+    };
+
+    if (result.outcome === 'SUCCESS') {
+      return this.prisma.$transaction(async (tx) => {
+        const claim = await tx.airtimePurchase.updateMany({
+          where: { id: purchaseId, status: { in: ['PENDING', 'UNKNOWN'] } },
+          data: { status: 'COMPLETED', ...providerData, paidAt: new Date() },
+        });
+        if (claim.count === 0) return tx.airtimePurchase.findUniqueOrThrow({ where: { id: purchaseId } });
+        await tx.walletTransaction.updateMany({
+          where: { id: transactionId, status: 'PENDING' },
+          data: { status: 'SUCCESS', ...providerData, paidAt: new Date() },
+        });
+        return tx.airtimePurchase.findUniqueOrThrow({ where: { id: purchaseId } });
+      });
+    }
+
+    if (result.outcome === 'REJECTED') {
+      return this.prisma.$transaction(async (tx) => {
+        const claim = await tx.airtimePurchase.updateMany({
+          where: { id: purchaseId, status: { in: ['PENDING', 'UNKNOWN'] } },
+          data: { status: 'FAILED', ...providerData },
+        });
+        if (claim.count === 0) return tx.airtimePurchase.findUniqueOrThrow({ where: { id: purchaseId } });
+        await tx.walletTransaction.updateMany({
+          where: { id: transactionId, status: 'PENDING' },
+          data: { status: 'FAILED', ...providerData },
+        });
+
+        const currentWallet = await tx.wallet.findUniqueOrThrow({ where: { id: walletId } });
+        const refundBalance = Number(currentWallet.balance) + amount;
+        await tx.wallet.update({ where: { id: walletId }, data: { balance: { increment: amount } } });
+        await tx.walletTransaction.create({
+          data: {
+            walletId,
+            type: 'CREDIT',
+            amount,
+            balanceBefore: currentWallet.balance,
+            balanceAfter: refundBalance,
+            reference: `AIR-REFUND-${purchaseId}`,
+            status: 'SUCCESS',
+            description: `Refund for rejected airtime purchase ${purchaseId}`,
+          },
+        });
+        return tx.airtimePurchase.findUniqueOrThrow({ where: { id: purchaseId } });
+      });
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const status = result.outcome === 'UNKNOWN' ? 'UNKNOWN' : 'PENDING';
+      await tx.airtimePurchase.updateMany({
+        where: { id: purchaseId, status: { in: ['PENDING', 'UNKNOWN'] } },
+        data: { status, ...providerData },
+      });
+      await tx.walletTransaction.updateMany({
+        where: { id: transactionId, status: 'PENDING' },
+        data: providerData,
+      });
+      return tx.airtimePurchase.findUniqueOrThrow({ where: { id: purchaseId } });
+    });
+  }
+
   myPurchases(vendorId: string) {
     return this.prisma.airtimePurchase.findMany({
       where: { vendorId },

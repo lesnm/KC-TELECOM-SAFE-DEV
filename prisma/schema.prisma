@@ -46,12 +46,27 @@ enum PurchaseStatus {
   PENDING
   COMPLETED
   FAILED
+  UNKNOWN
 }
 
 enum DataSubscriptionStatus {
   PENDING
   COMPLETED
   FAILED
+  UNKNOWN
+}
+
+enum ProviderOutcome {
+  SUCCESS
+  REJECTED
+  PENDING
+  UNKNOWN
+}
+
+enum ProviderRetryability {
+  RETRYABLE
+  NOT_RETRYABLE
+  UNKNOWN
 }
 
 enum ConversionType {
@@ -115,9 +130,12 @@ model WalletTransaction {
   reference     String         @unique
   status        WalletTxStatus @default(PENDING)
   description   String?
-  provider      String?
-  providerReference String?
-  providerResponse  Json?
+  provider            String?
+  providerReference  String?
+  providerStatus     String?
+  providerOutcome    ProviderOutcome?
+  providerRetryability ProviderRetryability?
+  providerResponse   Json?
   paidAt        DateTime?
   creditedAt    DateTime?
   conversionRequest ConversionRequest?
@@ -222,7 +240,15 @@ model AirtimePurchase {
   phone     String
   amount    Decimal        @db.Decimal(14, 2)
   reference String         @unique
-  status    PurchaseStatus @default(COMPLETED)
+  status    PurchaseStatus @default(PENDING)
+
+  provider             String?
+  providerReference    String?
+  providerStatus       String?
+  providerOutcome      ProviderOutcome?
+  providerRetryability ProviderRetryability?
+  providerResponse     Json?
+  paidAt               DateTime?
 
   createdAt DateTime       @default(now())
 
@@ -241,6 +267,9 @@ model DataSubscription {
   status        DataSubscriptionStatus  @default(PENDING)
   provider      String?
   providerReference String?
+  providerStatus String?
+  providerOutcome ProviderOutcome?
+  providerRetryability ProviderRetryability?
   providerResponse  Json?
   paidAt        DateTime?
 

@@ -1,30 +1,21 @@
-import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateDataSubscriptionDto } from './dto/create-data-subscription.dto';
-import { VtuProvider } from '../airtime/providers/vtu.provider';
+import { DataProvider } from './providers/data.provider';
+import { NormalizedProviderResult } from '../providers/provider-result';
 
 @Injectable()
 export class DataService {
   constructor(
     private prisma: PrismaService,
-    @Inject('VTU_PROVIDER') private vtu: VtuProvider,
+    @Inject('DATA_PROVIDER') private provider: DataProvider,
   ) {}
 
-  /**
-   * Vendor purchases a data subscription.
-   * Flow:
-   * 1. Create a PENDING DataSubscription, debit wallet and create a PENDING DEBIT ledger entry (atomic).
-   * 2. Call external VTU provider.
-   * 3a. On success: mark subscription COMPLETED, mark debit SUCCESS, store provider info.
-   * 3b. On failure: mark subscription FAILED, mark initial debit FAILED, create a SUCCESS CREDIT to refund.
-   */
   async purchase(vendorId: string, dto: CreateDataSubscriptionDto) {
-    // Step 0: basic checks and wallet lookup
     const wallet = await this.prisma.wallet.findUnique({ where: { userId: vendorId } });
     if (!wallet) throw new NotFoundException('Vendor wallet not found');
-
     if (Number(wallet.balance) < dto.amount) {
       throw new BadRequestException(
         `Insufficient wallet balance. Available: ₦${Number(wallet.balance).toFixed(2)}`,
@@ -32,174 +23,171 @@ export class DataService {
     }
 
     const reference = `DATA-${randomUUID()}`;
-    const balanceBefore = wallet.balance;
-    const newBalance = Number(wallet.balance) - dto.amount;
-
-    // Step 1: create subscription (PENDING), debit wallet and create a PENDING ledger entry
-    const txResult = await this.prisma.$transaction(
-      async (tx) => {
-        const dataSubscription = await tx.dataSubscription.create({
-          data: {
-            vendorId,
-            network: dto.network,
-            phone: dto.phone,
-            plan: dto.plan,
-            amount: dto.amount,
-            reference,
-            status: 'PENDING',
-          },
-        });
-
-        await tx.wallet.update({
-          where: { id: wallet.id },
-          data: { balance: newBalance },
-        });
-
-        const txEntry = await tx.walletTransaction.create({
-          data: {
-            walletId: wallet.id,
-            type: 'DEBIT',
-            amount: dto.amount,
-            balanceBefore,
-            balanceAfter: newBalance,
-            reference,
-            status: 'PENDING',
-            description: `Data subscription: ${dto.network} ${dto.plan} to ${dto.phone}`,
-          },
-        });
-
-        return { dataSubscription, txEntry };
-      },
-      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
-    );
-
-    // Step 2: call external provider
-    let providerResult: { success: boolean; providerReference?: string; rawResponse?: any; message?: string };
+    let txResult: { dataSubscription: { id: string }; txEntry: { id: string } };
     try {
-      providerResult = await this.vtu.purchaseData?.(
-        {
-          network: dto.network,
-          phone: dto.phone,
-          amount: dto.amount,
-          reference,
-          plan: dto.plan,
-        },
-      ) ?? { success: false, message: 'Provider does not support data purchases' };
-    } catch (err) {
-      providerResult = { success: false, message: err instanceof Error ? err.message : String(err) };
-    }
-
-    // Step 3: reconcile based on provider response
-    if (providerResult.success) {
-      // Provider succeeded: mark subscription COMPLETED and tx SUCCESS
-      const updated = await this.prisma.$transaction(
+      txResult = await this.prisma.$transaction(
         async (tx) => {
-          const subscription = await tx.dataSubscription.update({
-            where: { id: txResult.dataSubscription.id },
+          const currentWallet = await tx.wallet.findUnique({ where: { id: wallet.id } });
+          if (!currentWallet) throw new NotFoundException('Vendor wallet not found');
+          if (Number(currentWallet.balance) < dto.amount) {
+            throw new BadRequestException('Insufficient wallet balance');
+          }
+
+          const balanceBefore = currentWallet.balance;
+          const newBalance = Number(balanceBefore) - dto.amount;
+          const dataSubscription = await tx.dataSubscription.create({
             data: {
-              status: 'COMPLETED',
-              provider: this.vtu.name ?? null,
-              providerReference: providerResult.providerReference ?? null,
-              providerResponse: providerResult.rawResponse ?? null,
-              paidAt: new Date(),
+              vendorId,
+              network: dto.network,
+              phone: dto.phone,
+              plan: dto.plan,
+              amount: dto.amount,
+              reference,
+              status: 'PENDING',
             },
           });
 
-          await tx.walletTransaction.update({
-            where: { id: txResult.txEntry.id },
+          await tx.wallet.update({
+            where: { id: wallet.id },
+            data: { balance: { decrement: dto.amount } },
+          });
+
+          const txEntry = await tx.walletTransaction.create({
             data: {
-              status: 'SUCCESS',
-              provider: this.vtu.name ?? null,
-              providerReference: providerResult.providerReference ?? null,
-              providerResponse: providerResult.rawResponse ?? null,
+              walletId: wallet.id,
+              type: 'DEBIT',
+              amount: dto.amount,
+              balanceBefore,
+              balanceAfter: newBalance,
+              reference,
+              status: 'PENDING',
+              description: `Data subscription: ${dto.network} ${dto.plan} to ${dto.phone}`,
             },
           });
 
-          return subscription;
+          return { dataSubscription, txEntry };
         },
         { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
       );
-
-      return updated;
+    } catch (error: any) {
+      if (error?.code === 'P2034') {
+        throw new ConflictException('Wallet is busy processing another purchase, please retry');
+      }
+      throw error;
     }
 
-    // Provider failed: mark subscription FAILED, initial debit FAILED, and refund via CREDIT
-    const refunded = await this.prisma.$transaction(
-      async (tx) => {
-        const failedSubscription = await tx.dataSubscription.update({
-          where: { id: txResult.dataSubscription.id },
-          data: {
-            status: 'FAILED',
-            provider: this.vtu.name ?? null,
-            providerResponse: providerResult.rawResponse ?? { message: providerResult.message },
-          },
-        });
+    let result: NormalizedProviderResult;
+    try {
+      result = await this.provider.purchaseData({
+        network: dto.network,
+        phone: dto.phone,
+        amount: dto.amount,
+        plan: dto.plan,
+        reference,
+      });
+    } catch (error) {
+      result = {
+        outcome: 'UNKNOWN',
+        providerName: this.provider.name,
+        retryability: 'UNKNOWN',
+        message: error instanceof Error ? error.message : String(error),
+      };
+    }
 
-        await tx.walletTransaction.update({
-          where: { id: txResult.txEntry.id },
-          data: {
-            status: 'FAILED',
-            provider: this.vtu.name ?? null,
-            providerResponse: providerResult.rawResponse ?? { message: providerResult.message },
-          },
-        });
-
-        // Refund: credit back to wallet
-        const currentWallet = await tx.wallet.findUniqueOrThrow({ where: { id: wallet.id } });
-        const refundBalance = Number(currentWallet.balance) + dto.amount;
-
-        await tx.wallet.update({
-          where: { id: wallet.id },
-          data: { balance: refundBalance },
-        });
-
-        await tx.walletTransaction.create({
-          data: {
-            walletId: wallet.id,
-            type: 'REFUND',
-            amount: dto.amount,
-            balanceBefore: currentWallet.balance,
-            balanceAfter: refundBalance,
-            reference: `REFUND-${reference}`,
-            status: 'SUCCESS',
-            description: `Refund for failed data subscription: ${reference}`,
-          },
-        });
-
-        return failedSubscription;
-      },
-      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
-    );
-
-    return refunded;
+    return this.reconcile(txResult.dataSubscription.id, txResult.txEntry.id, wallet.id, dto.amount, result);
   }
 
-  /**
-   * Get all data subscriptions for a vendor.
-   */
+  private async reconcile(
+    subscriptionId: string,
+    transactionId: string,
+    walletId: string,
+    amount: number,
+    result: NormalizedProviderResult,
+  ) {
+    const providerData = {
+      provider: result.providerName,
+      providerReference: result.providerReference,
+      providerStatus: result.providerStatus,
+      providerOutcome: result.outcome,
+      providerRetryability: result.retryability,
+      providerResponse: result.rawResponse as Prisma.InputJsonValue,
+    };
+
+    if (result.outcome === 'SUCCESS') {
+      return this.prisma.$transaction(async (tx) => {
+        const claim = await tx.dataSubscription.updateMany({
+          where: { id: subscriptionId, status: { in: ['PENDING', 'UNKNOWN'] } },
+          data: { status: 'COMPLETED', ...providerData, paidAt: new Date() },
+        });
+        if (claim.count === 0) return tx.dataSubscription.findUniqueOrThrow({ where: { id: subscriptionId } });
+        await tx.walletTransaction.updateMany({
+          where: { id: transactionId, status: 'PENDING' },
+          data: { status: 'SUCCESS', ...providerData, paidAt: new Date() },
+        });
+        return tx.dataSubscription.findUniqueOrThrow({ where: { id: subscriptionId } });
+      });
+    }
+
+    if (result.outcome === 'REJECTED') {
+      return this.prisma.$transaction(async (tx) => {
+        const claim = await tx.dataSubscription.updateMany({
+          where: { id: subscriptionId, status: { in: ['PENDING', 'UNKNOWN'] } },
+          data: { status: 'FAILED', ...providerData },
+        });
+        if (claim.count === 0) return tx.dataSubscription.findUniqueOrThrow({ where: { id: subscriptionId } });
+        await tx.walletTransaction.updateMany({
+          where: { id: transactionId, status: 'PENDING' },
+          data: { status: 'FAILED', ...providerData },
+        });
+
+        const currentWallet = await tx.wallet.findUniqueOrThrow({ where: { id: walletId } });
+        const refundBalance = Number(currentWallet.balance) + amount;
+        await tx.wallet.update({ where: { id: walletId }, data: { balance: { increment: amount } } });
+        await tx.walletTransaction.create({
+          data: {
+            walletId,
+            type: 'REFUND',
+            amount,
+            balanceBefore: currentWallet.balance,
+            balanceAfter: refundBalance,
+            reference: `DATA-REFUND-${subscriptionId}`,
+            status: 'SUCCESS',
+            description: `Refund for rejected data subscription ${subscriptionId}`,
+          },
+        });
+        return tx.dataSubscription.findUniqueOrThrow({ where: { id: subscriptionId } });
+      });
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const status = result.outcome === 'UNKNOWN' ? 'UNKNOWN' : 'PENDING';
+      await tx.dataSubscription.updateMany({
+        where: { id: subscriptionId, status: { in: ['PENDING', 'UNKNOWN'] } },
+        data: { status, ...providerData },
+      });
+      await tx.walletTransaction.updateMany({
+        where: { id: transactionId, status: 'PENDING' },
+        data: providerData,
+      });
+      return tx.dataSubscription.findUniqueOrThrow({ where: { id: subscriptionId } });
+    });
+  }
+
   async getSubscriptions(vendorId: string) {
     const vendor = await this.prisma.user.findUnique({ where: { id: vendorId } });
     if (!vendor) throw new NotFoundException('Vendor not found');
-
     return this.prisma.dataSubscription.findMany({
       where: { vendorId },
       orderBy: { createdAt: 'desc' },
     });
   }
 
-  /**
-   * Get a specific subscription by ID (owner-only).
-   */
   async getSubscriptionById(vendorId: string, subscriptionId: string) {
-    const subscription = await this.prisma.dataSubscription.findUnique({
-      where: { id: subscriptionId },
-    });
-
+    const subscription = await this.prisma.dataSubscription.findUnique({ where: { id: subscriptionId } });
     if (!subscription) throw new NotFoundException('Data subscription not found');
     if (subscription.vendorId !== vendorId) {
       throw new BadRequestException('You do not have access to this subscription');
     }
-
     return subscription;
   }
 }
