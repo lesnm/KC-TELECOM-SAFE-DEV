@@ -48,4 +48,4 @@ HEALTHCHECK --interval=10s --timeout=5s --start-period=15s --retries=5 \
 
 # Apply migrations, then start the API.
 # "migrate deploy" is prod-safe: it only applies existing migrations, no prompts, no schema drift.
-CMD ["sh", "-c", "npx --no-install prisma migrate deploy && node dist/main"]
+CMD ["sh", "-c", "npx --no-install prisma migrate deploy && node dist/src/main.js"]

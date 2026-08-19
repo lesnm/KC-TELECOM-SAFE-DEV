@@ -8,7 +8,11 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule, { rawBody: true });
 
   app.use(helmet());
-  app.enableCors();
+  const frontendUrl = process.env.FRONTEND_URL;
+  if (process.env.NODE_ENV === 'production' && !frontendUrl) {
+    throw new Error('FRONTEND_URL is required in production');
+  }
+  app.enableCors({ origin: frontendUrl ?? true });
   app.setGlobalPrefix('api/v1');
 
   app.useGlobalPipes(

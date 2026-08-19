@@ -13,6 +13,7 @@ const statusTone: Record<WalletTransaction['status'], 'green' | 'amber' | 'red'>
 const typeTone: Record<WalletTransaction['type'], 'green' | 'amber' | 'slate'> = {
   FUNDING: 'green',
   DEBIT: 'slate',
+  CREDIT: 'green',
   REFUND: 'amber',
 };
 
