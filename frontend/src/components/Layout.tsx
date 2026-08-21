@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
@@ -16,6 +17,18 @@ const vendorNav = [
   { to: '/vendor/transactions', label: 'Transactions' },
 ];
 
+const mobileVendorNav = [
+  { to: '/vendor', label: 'Overview', end: true },
+  { to: '/vendor/wallet', label: 'Wallet' },
+  { to: '/vendor/transactions', label: 'Transactions' },
+  { to: '/vendor/buy-pins', label: 'Buy Recharge PINs' },
+  { to: '/vendor/purchases', label: 'My Purchased PINs' },
+  { to: '/vendor/buy-airtime', label: 'Buy Airtime' },
+  { to: '/vendor/airtime-history', label: 'Airtime History' },
+  { to: '/vendor/buy-data', label: 'Buy Data' },
+  { to: '/vendor/data-history', label: 'Data History' },
+];
+
 const adminNav = [
   { to: '/admin', label: 'Overview', end: true },
   { to: '/admin/create-batch', label: 'Create PIN Batch' },
@@ -30,7 +43,9 @@ const adminNav = [
 
 export function Layout() {
   const { user, logout } = useAuth();
+  const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
   const nav = user?.role === 'ADMIN' ? adminNav : vendorNav;
+  const isVendor = user?.role === 'VENDOR';
 
   return (
     <div className="flex min-h-screen bg-slate-50">
@@ -58,6 +73,20 @@ export function Layout() {
 
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex h-16 items-center justify-between border-b border-slate-200 bg-white px-4 sm:px-6">
+          {isVendor && (
+            <button
+              type="button"
+              aria-expanded={isMobileNavOpen}
+              aria-controls="mobile-vendor-navigation"
+              aria-label={isMobileNavOpen ? 'Close navigation menu' : 'Open navigation menu'}
+              onClick={() => setIsMobileNavOpen((isOpen) => !isOpen)}
+              className="mr-3 flex h-10 w-10 flex-col items-center justify-center gap-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-100 sm:hidden"
+            >
+              <span className="h-0.5 w-5 bg-current" />
+              <span className="h-0.5 w-5 bg-current" />
+              <span className="h-0.5 w-5 bg-current" />
+            </button>
+          )}
           <div className="sm:hidden text-lg font-bold text-brand-600">KC TELECOM</div>
           <div className="ml-auto flex items-center gap-4">
             <div className="text-right">
@@ -72,6 +101,32 @@ export function Layout() {
             </button>
           </div>
         </header>
+
+        {isVendor && isMobileNavOpen && (
+          <nav
+            id="mobile-vendor-navigation"
+            aria-label="Vendor navigation"
+            className="border-b border-slate-200 bg-white px-4 py-3 sm:hidden"
+          >
+            <div className="grid grid-cols-2 gap-1">
+              {mobileVendorNav.map((item) => (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  end={item.end}
+                  onClick={() => setIsMobileNavOpen(false)}
+                  className={({ isActive }) =>
+                    `rounded-lg px-3 py-2 text-sm font-medium transition ${
+                      isActive ? 'bg-brand-50 text-brand-700' : 'text-slate-600 hover:bg-slate-100'
+                    }`
+                  }
+                >
+                  {item.label}
+                </NavLink>
+              ))}
+            </div>
+          </nav>
+        )}
 
         <main className="flex-1 p-4 sm:p-6">
           <Outlet />
