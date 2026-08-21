@@ -10,6 +10,9 @@ import VendorDashboard from './pages/vendor/VendorDashboard';
 import Wallet from './pages/vendor/Wallet';
 import BuyPins from './pages/vendor/BuyPins';
 import BuyAirtime from './pages/vendor/BuyAirtime';
+import BuyData from './pages/vendor/BuyData';
+import DataHistory from './pages/vendor/DataHistory';
+import AirtimeHistory from './pages/vendor/AirtimeHistory';
 import MyPurchases from './pages/vendor/MyPurchases';
 import PurchasedPins from './pages/vendor/PurchasedPins';
 import Transactions from './pages/vendor/Transactions';
@@ -48,6 +51,9 @@ export default function App() {
             <Route path="/vendor/wallet" element={<Wallet />} />
             <Route path="/vendor/buy-pins" element={<BuyPins />} />
             <Route path="/vendor/buy-airtime" element={<BuyAirtime />} />
+            <Route path="/vendor/buy-data" element={<BuyData />} />
+            <Route path="/vendor/data-history" element={<DataHistory />} />
+            <Route path="/vendor/airtime-history" element={<AirtimeHistory />} />
             <Route path="/vendor/airtime-to-cash" element={<AirtimeToCash />} />
             <Route path="/vendor/data-to-cash" element={<DataToCash />} />
             <Route path="/vendor/conversions" element={<ConversionHistory />} />
